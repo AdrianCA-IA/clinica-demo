@@ -16,120 +16,15 @@ Solo puede llamar las funciones de este módulo, que usan core/availability.py.
 import os
 import json
 from datetime import date
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, Depends
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
+from core.tools import REALTIME_TOOLS
+from core.security import require_admin
 
 load_dotenv()
 
 router = APIRouter(prefix="/calls", tags=["Llamadas IA"])
-
-# ── Definición de herramientas (formato Realtime API — sin wrapper "function") ──
-
-REALTIME_TOOLS = [
-    {
-        "type": "function",
-        "name": "listar_doctores",
-        "description": "Lista todos los doctores disponibles con sus especialidades e IDs"
-    },
-    {
-        "type": "function",
-        "name": "listar_tipos_cita",
-        "description": "Lista los tipos de cita disponibles con duración e IDs"
-    },
-    {
-        "type": "function",
-        "name": "consultar_disponibilidad",
-        "description": "Consulta huecos disponibles de un doctor para una fecha y tipo de cita concretos",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "doctor_id": {"type": "integer", "description": "ID del doctor"},
-                "appointment_type_id": {"type": "integer", "description": "ID del tipo de cita"},
-                "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD"}
-            },
-            "required": ["doctor_id", "appointment_type_id", "fecha"]
-        }
-    },
-    {
-        "type": "function",
-        "name": "buscar_paciente",
-        "description": "Busca un paciente por número de teléfono",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "phone": {"type": "string", "description": "Número de teléfono del paciente"}
-            },
-            "required": ["phone"]
-        }
-    },
-    {
-        "type": "function",
-        "name": "registrar_paciente",
-        "description": "Registra un nuevo paciente en el sistema",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "phone": {"type": "string"},
-                "email": {"type": "string", "description": "Opcional"}
-            },
-            "required": ["name", "phone"]
-        }
-    },
-    {
-        "type": "function",
-        "name": "crear_cita",
-        "description": "Crea una cita para el paciente. SIEMPRE confirma los datos antes de llamar.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "patient_id": {"type": "integer"},
-                "doctor_id": {"type": "integer"},
-                "appointment_type_id": {"type": "integer"},
-                "start_datetime": {"type": "string", "description": "ISO: 2025-01-15T09:00:00"},
-                "notes": {"type": "string", "description": "Notas opcionales"}
-            },
-            "required": ["patient_id", "doctor_id", "appointment_type_id", "start_datetime"]
-        }
-    },
-    {
-        "type": "function",
-        "name": "ver_citas_paciente",
-        "description": "Ver las citas próximas de un paciente",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "patient_id": {"type": "integer"}
-            },
-            "required": ["patient_id"]
-        }
-    },
-    {
-        "type": "function",
-        "name": "cancelar_cita",
-        "description": "Cancela una cita existente",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "appointment_id": {"type": "integer"}
-            },
-            "required": ["appointment_id"]
-        }
-    },
-    {
-        "type": "function",
-        "name": "listar_citas_del_dia",
-        "description": "Lista todas las citas programadas para una fecha concreta",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD"}
-            },
-            "required": ["fecha"]
-        }
-    }
-]
 
 VOICE_SYSTEM_PROMPT = """Eres el asistente de voz de la Clínica Dental Demo. Atiendes llamadas telefónicas de pacientes.
 
@@ -250,7 +145,8 @@ async def incoming_call(request: Request):
 
 # ── REST: Lanzar llamada saliente ──────────────────────────────────────────
 
-@router.post("/outbound", summary="Llamar a un número — el agente IA gestiona la llamada")
+@router.post("/outbound", summary="Llamar a un número — el agente IA gestiona la llamada",
+             dependencies=[Depends(require_admin)])
 async def make_outbound_call(
     phone: str = Query(..., description="Número destino, ej: +34666159111")
 ):

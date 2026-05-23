@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Time
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Time, func
 from sqlalchemy.orm import relationship
-from datetime import datetime
 from .database import Base
 
 
@@ -12,7 +11,7 @@ class Patient(Base):
     name = Column(String, nullable=False)
     phone = Column(String, unique=True, nullable=False, index=True)
     email = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
 
     appointments = relationship("Appointment", back_populates="patient")
 
@@ -72,7 +71,7 @@ class Appointment(Base):
     # Estado: scheduled | confirmed | cancelled | completed
     status = Column(String, default="scheduled", nullable=False)
     notes = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
     gcal_event_id = Column(String, nullable=True)  # ID del evento en Google Calendar
 
     patient = relationship("Patient", back_populates="appointments")

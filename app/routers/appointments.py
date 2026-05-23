@@ -107,6 +107,8 @@ def list_appointments(
     date_to: Optional[date] = Query(None, description="Rango fin YYYY-MM-DD"),
     doctor_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200, description="Máximo de resultados"),
+    offset: int = Query(0, ge=0, description="Saltar N resultados (paginación)"),
     db: Session = Depends(get_db)
 ):
     query = db.query(Appointment)
@@ -128,4 +130,4 @@ def list_appointments(
         query = query.filter(Appointment.doctor_id == doctor_id)
     if status:
         query = query.filter(Appointment.status == status)
-    return query.order_by(Appointment.start_datetime).all()
+    return query.order_by(Appointment.start_datetime).offset(offset).limit(limit).all()

@@ -9,6 +9,7 @@ import asyncio
 
 from app.database import engine, Base, get_db
 from app.routers import patients, doctors, appointments, availability, calls
+from core.security import require_admin, ws_rate_limiter
 
 # Crear todas las tablas al arrancar
 Base.metadata.create_all(bind=engine)
@@ -37,11 +38,13 @@ El LLM solo llama funciones de `core/availability.py`.
     version="2.0.0"
 )
 
-# CORS abierto para desarrollo local
+# CORS — configurable via .env (CORS_ORIGINS=http://localhost:3000,https://midominio.com)
+# Por defecto permite todo para desarrollo local
+_cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=True if _cors_origins != ["*"] else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -90,7 +93,8 @@ async def call_media_stream(websocket: WebSocket, db: Session = Depends(get_db))
     Audio formato g711_ulaw (mulaw 8kHz).
     """
     import websockets as ws_lib
-    from app.routers.calls import REALTIME_TOOLS, get_voice_prompt
+    from core.tools import REALTIME_TOOLS
+    from app.routers.calls import get_voice_prompt
 
     await websocket.accept()
 
@@ -268,11 +272,22 @@ async def websocket_chat(websocket: WebSocket, db: Session = Depends(get_db)):
         "message": "¡Hola! 👋 Soy el asistente virtual de la Clínica Dental Demo.\n\nPuedo ayudarte a:\n• Consultar disponibilidad de doctores\n• Pedir o cancelar una cita\n• Ver tus próximas citas\n\n¿En qué puedo ayudarte hoy?"
     })
 
+    # Identificar al cliente por IP para rate limiting
+    client_ip = websocket.client.host if websocket.client else "unknown"
+
     try:
         while True:
             data = await websocket.receive_json()
             user_msg = data.get("message", "").strip()
             if not user_msg:
+                continue
+
+            # Rate limiting: máximo 30 mensajes por minuto
+            if not ws_rate_limiter.check(client_ip):
+                await websocket.send_json({
+                    "type": "bot",
+                    "message": "Estás enviando mensajes demasiado rápido. Espera un momento, por favor."
+                })
                 continue
 
             from agent.agent import ClinicAgent
@@ -294,9 +309,11 @@ async def websocket_chat(websocket: WebSocket, db: Session = Depends(get_db)):
             pass
 
 
-@app.post("/seed", tags=["Sistema"], summary="Poblar BD con datos de demo")
+@app.post("/seed", tags=["Sistema"], summary="Poblar BD con datos de demo",
+          dependencies=[Depends(require_admin)])
 def seed_database(db: Session = Depends(get_db)):
-    """Ejecuta el seed de datos de demo. Borra los datos existentes primero."""
+    """Ejecuta el seed de datos de demo. Borra los datos existentes primero.
+    Requiere header X-Admin-Key."""
     from seed_data import run_seed
     run_seed(db)
     return {"mensaje": "Base de datos poblada con datos de demo correctamente"}

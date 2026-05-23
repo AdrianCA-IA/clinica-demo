@@ -8,137 +8,13 @@ llaman a core/availability.py.
 import os
 import json
 import asyncio
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from core.tools import CHAT_TOOLS as TOOLS
 
 load_dotenv()
-
-# ── Definición de herramientas para OpenAI ────────────────────────────────────
-
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "listar_doctores",
-            "description": "Lista todos los doctores disponibles con sus especialidades e IDs"
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "listar_tipos_cita",
-            "description": "Lista los tipos de cita disponibles con duración e IDs"
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "consultar_disponibilidad",
-            "description": "Consulta los huecos disponibles de un doctor para una fecha y tipo de cita concretos",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "doctor_id": {"type": "integer", "description": "ID del doctor"},
-                    "appointment_type_id": {"type": "integer", "description": "ID del tipo de cita"},
-                    "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD"}
-                },
-                "required": ["doctor_id", "appointment_type_id", "fecha"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "buscar_paciente",
-            "description": "Busca un paciente por número de teléfono",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "phone": {"type": "string", "description": "Número de teléfono del paciente"}
-                },
-                "required": ["phone"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "registrar_paciente",
-            "description": "Registra un nuevo paciente en el sistema",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "phone": {"type": "string"},
-                    "email": {"type": "string", "description": "Opcional"}
-                },
-                "required": ["name", "phone"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "crear_cita",
-            "description": "Crea una cita para el paciente. Siempre confirma los detalles antes de llamar esta función.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "patient_id": {"type": "integer"},
-                    "doctor_id": {"type": "integer"},
-                    "appointment_type_id": {"type": "integer"},
-                    "start_datetime": {"type": "string", "description": "ISO format: 2025-01-15T09:00:00"},
-                    "notes": {"type": "string", "description": "Notas opcionales"}
-                },
-                "required": ["patient_id", "doctor_id", "appointment_type_id", "start_datetime"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ver_citas_paciente",
-            "description": "Ver las citas próximas de un paciente",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "patient_id": {"type": "integer"}
-                },
-                "required": ["patient_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "cancelar_cita",
-            "description": "Cancela una cita existente",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "appointment_id": {"type": "integer"}
-                },
-                "required": ["appointment_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "listar_citas_del_dia",
-            "description": "Lista todas las citas programadas para una fecha concreta. Úsala cuando alguien pregunte qué citas hay un día, cuántas citas hay, o quiera ver la agenda del día.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD"}
-                },
-                "required": ["fecha"]
-            }
-        }
-    }
-]
 
 SYSTEM_PROMPT = """Eres el asistente virtual de la Clínica Dental Demo. Ayudas a los pacientes a gestionar sus citas de forma amable y eficiente por WhatsApp.
 
@@ -270,7 +146,7 @@ class ClinicAgent:
 
     def _ver_citas_paciente(self, patient_id: int) -> str:
         from app.models import Appointment
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         citas = self.db.query(Appointment).filter(
             Appointment.patient_id == patient_id,
             Appointment.start_datetime >= now,
@@ -313,15 +189,25 @@ class ClinicAgent:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def _cancelar_cita(self, appointment_id: int) -> str:
+    def _cancelar_cita(self, appointment_id: int, patient_id: int = None) -> str:
         from app.models import Appointment
         appt = self.db.get(Appointment, appointment_id)
         if not appt:
             return json.dumps({"ok": False, "error": "Cita no encontrada"})
+        # Verificar que la cita pertenece al paciente que la solicita
+        if patient_id and appt.patient_id != patient_id:
+            return json.dumps({"ok": False, "error": "Esta cita no pertenece al paciente indicado"})
         if appt.status in ("cancelled", "completed"):
             return json.dumps({"ok": False, "error": f"La cita ya está en estado '{appt.status}'"})
         appt.status = "cancelled"
         self.db.commit()
+        # Cancelar en Google Calendar si existe
+        if appt.gcal_event_id:
+            try:
+                from core.google_calendar import cancel_event_sync
+                cancel_event_sync(appt.gcal_event_id)
+            except Exception:
+                pass
         return json.dumps({"ok": True, "mensaje": "Cita cancelada correctamente"})
 
     def _execute_tool(self, name: str, args: dict) -> str:
