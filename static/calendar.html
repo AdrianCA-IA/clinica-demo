@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clínica Dental — Calendario de Citas</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f7fa;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #1a202c;
+    --text-muted: #718096;
+    --primary: #4361ee;
+    --primary-light: #eef0fd;
+    --header-h: 64px;
+    --sidebar-w: 220px;
+    --time-col: 56px;
+    --hour-h: 64px;
+    --slot-start: 8;   /* 08:00 */
+    --slot-end: 20;    /* 20:00 */
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ── */
+  .topbar {
+    height: var(--header-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .topbar-logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn.primary { background: var(--primary); color: white; border-color: var(--primary); }
+  .btn.primary:hover { background: #3451d1; }
+  .btn.ghost { border: none; }
+  .btn.ghost:hover { background: var(--bg); }
+
+  .week-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .week-label {
+    font-size: 16px;
+    font-weight: 600;
+    min-width: 240px;
+    text-align: center;
+  }
+
+  .nav-arrow {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: background .15s;
+  }
+  .nav-arrow:hover { background: var(--bg); }
+
+  .spacer { flex: 1; }
+
+  /* Doctor filter pills */
+  .doctor-pills {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .pill {
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .pill.all { background: var(--primary); color: white; }
+  .pill.all.inactive { background: var(--bg); color: var(--text-muted); border-color: var(--border); }
+  .pill.doc { color: white; }
+  .pill.doc.inactive { filter: grayscale(1); opacity: .5; }
+
+  /* ── Main layout ── */
+  .main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Day headers */
+  .day-header-row {
+    display: grid;
+    grid-template-columns: var(--time-col) repeat(7, 1fr);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .day-header-row .time-gutter { /* empty corner */ }
+
+  .day-header {
+    padding: 10px 8px 8px;
+    text-align: center;
+    border-left: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .day-header .dow {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .day-header .dnum {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text);
+  }
+  .day-header.today .dnum {
+    background: var(--primary);
+    color: white;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .day-header.today .dow { color: var(--primary); }
+
+  /* Scroll area */
+  .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+  }
+  .scroll-area::-webkit-scrollbar { width: 6px; }
+  .scroll-area::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 3px; }
+
+  /* Grid */
+  .week-grid {
+    display: grid;
+    grid-template-columns: var(--time-col) repeat(7, 1fr);
+    position: relative;
+    min-height: calc((var(--slot-end) - var(--slot-start)) * var(--hour-h));
+  }
+
+  /* Time column */
+  .time-col {
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    left: 0;
+    background: var(--surface);
+    z-index: 2;
+    border-right: 1px solid var(--border);
+  }
+  .time-label {
+    height: var(--hour-h);
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 0 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding-top: 2px;
+    font-weight: 500;
+  }
+
+  /* Day columns */
+  .day-col {
+    border-left: 1px solid var(--border);
+    position: relative;
+  }
+
+  /* Hour lines */
+  .hour-line {
+    position: absolute;
+    left: 0; right: 0;
+    border-top: 1px solid var(--border);
+    pointer-events: none;
+  }
+  .half-line {
+    position: absolute;
+    left: 0; right: 0;
+    border-top: 1px dashed #edf2f7;
+    pointer-events: none;
+  }
+
+  /* Appointment blocks */
+  .appt-block {
+    position: absolute;
+    left: 3px; right: 3px;
+    border-radius: 6px;
+    padding: 4px 7px;
+    font-size: 11px;
+    cursor: pointer;
+    overflow: hidden;
+    z-index: 1;
+    transition: filter .12s, transform .12s;
+    border-left: 3px solid rgba(0,0,0,.25);
+  }
+  .appt-block:hover { filter: brightness(.93); transform: scale(1.01); z-index: 5; }
+
+  .appt-block .appt-time { font-weight: 600; font-size: 10px; opacity: .85; }
+  .appt-block .appt-patient { font-weight: 700; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .appt-block .appt-type { opacity: .8; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .appt-block.cancelled { opacity: .45; text-decoration: line-through; }
+
+  /* Current time line */
+  .now-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: #e53e3e;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .now-line::before {
+    content: '';
+    position: absolute;
+    left: -4px;
+    top: -4px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #e53e3e;
+  }
+
+  /* Empty state */
+  .empty-day {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeOverlay .15s ease;
+  }
+  .modal-overlay.open { display: flex; }
+  @keyframes fadeOverlay { from { opacity: 0; } to { opacity: 1; } }
+
+  .modal {
+    background: white;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 420px;
+    padding: 28px;
+    position: relative;
+    animation: slideUp .2s ease;
+    box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .modal-close {
+    position: absolute;
+    top: 16px; right: 16px;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: var(--bg);
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+  }
+  .modal-close:hover { background: #e2e8f0; }
+
+  .modal-color-bar {
+    height: 5px;
+    border-radius: 3px;
+    margin-bottom: 16px;
+  }
+
+  .modal h2 { font-size: 20px; margin-bottom: 4px; }
+  .modal .modal-type { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; }
+
+  .modal-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+  .modal-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .modal-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 600; }
+  .modal-value { font-size: 14px; font-weight: 500; }
+
+  .status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .status-scheduled { background: #ebf4ff; color: #2b6cb0; }
+  .status-confirmed { background: #f0fff4; color: #276749; }
+  .status-cancelled { background: #fff5f5; color: #c53030; }
+  .status-completed { background: #faf5ff; color: #553c9a; }
+
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+
+  /* Loading spinner */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-muted);
+    font-size: 14px;
+    gap: 10px;
+  }
+  .spinner {
+    width: 20px; height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #2d3748;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    z-index: 200;
+    opacity: 0;
+    transition: all .3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-logo">🦷 Clínica Demo</div>
+
+  <div class="week-nav">
+    <button class="nav-arrow" id="prevWeek">&#8249;</button>
+    <div class="week-label" id="weekLabel">cargando...</div>
+    <button class="nav-arrow" id="nextWeek">&#8250;</button>
+  </div>
+
+  <button class="btn" id="todayBtn">Hoy</button>
+
+  <div class="spacer"></div>
+
+  <div class="doctor-pills" id="doctorPills">
+    <div class="pill all" data-id="all">Todos</div>
+  </div>
+
+  <a href="/chat" class="btn primary" style="text-decoration:none">💬 Chat</a>
+</div>
+
+<!-- Calendar -->
+<div class="main">
+  <!-- Day headers -->
+  <div class="day-header-row">
+    <div class="time-gutter"></div>
+    <div class="day-header" id="dh0"><div class="dow">Lun</div><div class="dnum">-</div></div>
+    <div class="day-header" id="dh1"><div class="dow">Mar</div><div class="dnum">-</div></div>
+    <div class="day-header" id="dh2"><div class="dow">Mié</div><div class="dnum">-</div></div>
+    <div class="day-header" id="dh3"><div class="dow">Jue</div><div class="dnum">-</div></div>
+    <div class="day-header" id="dh4"><div class="dow">Vie</div><div class="dnum">-</div></div>
+    <div class="day-header" id="dh5"><div class="dow">Sáb</div><div class="dnum">-</div></div>
+    <div class="day-header" id="dh6"><div class="dow">Dom</div><div class="dnum">-</div></div>
+  </div>
+
+  <!-- Scrollable grid -->
+  <div class="scroll-area" id="scrollArea">
+    <div class="week-grid" id="weekGrid">
+      <!-- Time labels -->
+      <div class="time-col" id="timeCol"></div>
+      <!-- Day columns -->
+      <div class="day-col" id="col0"></div>
+      <div class="day-col" id="col1"></div>
+      <div class="day-col" id="col2"></div>
+      <div class="day-col" id="col3"></div>
+      <div class="day-col" id="col4"></div>
+      <div class="day-col" id="col5"></div>
+      <div class="day-col" id="col6"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal">
+    <button class="modal-close" id="modalClose">✕</button>
+    <div class="modal-color-bar" id="modalColorBar"></div>
+    <h2 id="modalPatient"></h2>
+    <div class="modal-type" id="modalType"></div>
+    <div class="modal-row">
+      <div class="modal-icon">🗓</div>
+      <div>
+        <div class="modal-label">Fecha y hora</div>
+        <div class="modal-value" id="modalDatetime"></div>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-icon">👨‍⚕️</div>
+      <div>
+        <div class="modal-label">Doctor</div>
+        <div class="modal-value" id="modalDoctor"></div>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-icon">📞</div>
+      <div>
+        <div class="modal-label">Teléfono paciente</div>
+        <div class="modal-value" id="modalPhone"></div>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-icon">⏱</div>
+      <div>
+        <div class="modal-label">Duración</div>
+        <div class="modal-value" id="modalDuration"></div>
+      </div>
+    </div>
+    <div class="modal-row" id="modalNotesRow" style="display:none">
+      <div class="modal-icon">📝</div>
+      <div>
+        <div class="modal-label">Notas</div>
+        <div class="modal-value" id="modalNotes"></div>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-icon">🔖</div>
+      <div>
+        <div class="modal-label">Estado</div>
+        <div class="modal-value" id="modalStatus"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="modalConfirmBtn" style="display:none">✅ Confirmar</button>
+      <button class="btn" id="modalCancelBtn" style="display:none; color:#c53030;">✕ Cancelar cita</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const HOUR_START = 8;
+const HOUR_END   = 20;
+const HOUR_H     = 64; // px per hour (must match CSS --hour-h)
+const TOTAL_H    = (HOUR_END - HOUR_START) * HOUR_H;
+
+const DOW_ES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+// Doctor color palette — vibrant but readable on white text
+const DOCTOR_COLORS = [
+  '#4361ee','#f72585','#7209b7','#3a0ca3','#4cc9f0',
+  '#06d6a0','#fb5607','#ff006e','#8338ec','#3a86ff'
+];
+
+// ── State ──────────────────────────────────────────────────────────────────
+let weekOffset = 0;      // 0 = current week
+let doctors    = [];
+let filterDoc  = 'all';
+let appointments = [];
+let colorMap   = {};     // doctor_id → color
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = (day === 0) ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function fmtDate(d) {
+  return d.toISOString().slice(0,10);
+}
+
+function fmtTime(dt) {
+  const d = new Date(dt);
+  return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDateLong(dt) {
+  const d = new Date(dt);
+  return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function minutesSince(dt) {
+  const d = new Date(dt);
+  return (d.getHours() - HOUR_START) * 60 + d.getMinutes();
+}
+
+function durationMin(start, end) {
+  return (new Date(end) - new Date(start)) / 60000;
+}
+
+function topPx(dt) {
+  return (minutesSince(dt) / 60) * HOUR_H;
+}
+
+function heightPx(start, end) {
+  return Math.max((durationMin(start, end) / 60) * HOUR_H, 20);
+}
+
+// ── Week calculation ───────────────────────────────────────────────────────
+function currentWeekDays() {
+  const today = new Date();
+  const monday = getMonday(today);
+  monday.setDate(monday.getDate() + weekOffset * 7);
+  return Array.from({length: 7}, (_, i) => addDays(monday, i));
+}
+
+// ── API calls ──────────────────────────────────────────────────────────────
+async function fetchDoctors() {
+  const res = await fetch('/doctors/');
+  return res.json();
+}
+
+async function fetchAppointments(dateFrom, dateTo) {
+  let url = `/appointments/?date_from=${dateFrom}&date_to=${dateTo}`;
+  if (filterDoc !== 'all') url += `&doctor_id=${filterDoc}`;
+  const res = await fetch(url);
+  return res.json();
+}
+
+async function confirmAppointment(id) {
+  const res = await fetch(`/appointments/${id}/confirm`, { method: 'PATCH' });
+  if (!res.ok) throw new Error((await res.json()).detail);
+  return res.json();
+}
+
+async function cancelAppointment(id) {
+  const res = await fetch(`/appointments/${id}/cancel`, { method: 'PATCH' });
+  if (!res.ok) throw new Error((await res.json()).detail);
+  return res.json();
+}
+
+// ── Render time column ─────────────────────────────────────────────────────
+function renderTimeCol() {
+  const col = document.getElementById('timeCol');
+  col.innerHTML = '';
+  for (let h = HOUR_START; h < HOUR_END; h++) {
+    const el = document.createElement('div');
+    el.className = 'time-label';
+    el.textContent = String(h).padStart(2,'0') + ':00';
+    col.appendChild(el);
+  }
+}
+
+// ── Render grid lines ──────────────────────────────────────────────────────
+function renderGridLines() {
+  for (let d = 0; d < 7; d++) {
+    const col = document.getElementById(`col${d}`);
+    col.innerHTML = '';
+    col.style.minHeight = TOTAL_H + 'px';
+    for (let h = 0; h < (HOUR_END - HOUR_START); h++) {
+      const line = document.createElement('div');
+      line.className = 'hour-line';
+      line.style.top = (h * HOUR_H) + 'px';
+      col.appendChild(line);
+
+      const half = document.createElement('div');
+      half.className = 'half-line';
+      half.style.top = (h * HOUR_H + HOUR_H / 2) + 'px';
+      col.appendChild(half);
+    }
+  }
+}
+
+// ── Render day headers ─────────────────────────────────────────────────────
+function renderDayHeaders(days) {
+  const todayStr = fmtDate(new Date());
+  days.forEach((d, i) => {
+    const el = document.getElementById(`dh${i}`);
+    el.querySelector('.dnum').textContent = d.getDate();
+    el.classList.toggle('today', fmtDate(d) === todayStr);
+  });
+
+  const first = days[0];
+  const last  = days[6];
+  const sameMonth = first.getMonth() === last.getMonth();
+  const opts = { month: 'long', year: 'numeric' };
+  if (sameMonth) {
+    document.getElementById('weekLabel').textContent =
+      `${first.getDate()} – ${last.getDate()} de ${first.toLocaleDateString('es-ES', opts)}`;
+  } else {
+    document.getElementById('weekLabel').textContent =
+      `${first.toLocaleDateString('es-ES', {day:'numeric', month:'short'})} – ${last.toLocaleDateString('es-ES', {day:'numeric', month:'short', year:'numeric'})}`;
+  }
+}
+
+// ── Render appointments ────────────────────────────────────────────────────
+function renderAppointments(days) {
+  // Clear existing blocks
+  for (let d = 0; d < 7; d++) {
+    const col = document.getElementById(`col${d}`);
+    col.querySelectorAll('.appt-block').forEach(el => el.remove());
+    col.querySelectorAll('.empty-day').forEach(el => el.remove());
+  }
+
+  const dayMap = {};
+  days.forEach((d, i) => { dayMap[fmtDate(d)] = i; });
+
+  appointments.forEach(appt => {
+    const dateKey = fmtDate(new Date(appt.start_datetime));
+    const colIdx  = dayMap[dateKey];
+    if (colIdx === undefined) return;
+
+    const col = document.getElementById(`col${colIdx}`);
+    const color = colorMap[appt.doctor_id] || '#718096';
+
+    const top  = topPx(appt.start_datetime);
+    const h    = heightPx(appt.start_datetime, appt.end_datetime);
+
+    if (top < 0 || top > TOTAL_H) return; // outside visible range
+
+    const block = document.createElement('div');
+    block.className = 'appt-block' + (appt.status === 'cancelled' ? ' cancelled' : '');
+    block.style.cssText = `top:${top}px; height:${h}px; background:${color}20; color:${color};`;
+    block.dataset.id = appt.id;
+
+    const showType = h > 36;
+    block.innerHTML = `
+      <div class="appt-time">${fmtTime(appt.start_datetime)} – ${fmtTime(appt.end_datetime)}</div>
+      <div class="appt-patient">${appt.patient.name}</div>
+      ${showType ? `<div class="appt-type">${appt.appointment_type.name}</div>` : ''}
+    `;
+
+    block.addEventListener('click', () => openModal(appt));
+    col.appendChild(block);
+  });
+}
+
+// ── Current time indicator ─────────────────────────────────────────────────
+function renderNowLine(days) {
+  document.querySelectorAll('.now-line').forEach(el => el.remove());
+  const now = new Date();
+  const todayStr = fmtDate(now);
+  const colIdx = days.findIndex(d => fmtDate(d) === todayStr);
+  if (colIdx === -1) return;
+  const h = now.getHours();
+  const m = now.getMinutes();
+  if (h < HOUR_START || h >= HOUR_END) return;
+
+  const top = ((h - HOUR_START) + m / 60) * HOUR_H;
+  const col = document.getElementById(`col${colIdx}`);
+  const line = document.createElement('div');
+  line.className = 'now-line';
+  line.style.top = top + 'px';
+  col.appendChild(line);
+}
+
+// ── Scroll to business hours ───────────────────────────────────────────────
+function scrollToNow() {
+  const now = new Date();
+  const h = now.getHours();
+  const scrollH = Math.max(0, ((h - HOUR_START - 1) * HOUR_H));
+  document.getElementById('scrollArea').scrollTop = scrollH;
+}
+
+// ── Doctor pills ───────────────────────────────────────────────────────────
+function renderDoctorPills() {
+  const container = document.getElementById('doctorPills');
+  container.innerHTML = '';
+
+  const allPill = document.createElement('div');
+  allPill.className = 'pill all' + (filterDoc !== 'all' ? ' inactive' : '');
+  allPill.dataset.id = 'all';
+  allPill.textContent = 'Todos';
+  allPill.addEventListener('click', () => setFilter('all'));
+  container.appendChild(allPill);
+
+  doctors.forEach(doc => {
+    const pill = document.createElement('div');
+    const color = colorMap[doc.id];
+    pill.className = 'pill doc' + (filterDoc !== 'all' && filterDoc != doc.id ? ' inactive' : '');
+    pill.style.background = filterDoc === 'all' || filterDoc == doc.id ? color : '';
+    pill.dataset.id = doc.id;
+    pill.textContent = doc.name.split(' ').slice(0,2).join(' ');
+    pill.addEventListener('click', () => setFilter(doc.id));
+    container.appendChild(pill);
+  });
+}
+
+function setFilter(id) {
+  filterDoc = id;
+  renderDoctorPills();
+  loadWeek();
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+let currentApptId = null;
+
+function openModal(appt) {
+  currentApptId = appt.id;
+  const color = colorMap[appt.doctor_id] || '#718096';
+
+  document.getElementById('modalColorBar').style.background = color;
+  document.getElementById('modalPatient').textContent = appt.patient.name;
+  document.getElementById('modalType').textContent = appt.appointment_type.name;
+
+  const start = new Date(appt.start_datetime);
+  const end   = new Date(appt.end_datetime);
+  document.getElementById('modalDatetime').textContent =
+    `${fmtDateLong(start)} · ${fmtTime(start)} – ${fmtTime(end)}`;
+
+  document.getElementById('modalDoctor').textContent =
+    `${appt.doctor.name} · ${appt.doctor.specialty}`;
+  document.getElementById('modalPhone').textContent = appt.patient.phone;
+  document.getElementById('modalDuration').textContent =
+    `${durationMin(appt.start_datetime, appt.end_datetime)} minutos`;
+
+  if (appt.notes) {
+    document.getElementById('modalNotesRow').style.display = 'flex';
+    document.getElementById('modalNotes').textContent = appt.notes;
+  } else {
+    document.getElementById('modalNotesRow').style.display = 'none';
+  }
+
+  const statusLabels = {
+    scheduled: 'Programada', confirmed: 'Confirmada',
+    cancelled: 'Cancelada',  completed: 'Completada'
+  };
+  const statusClasses = {
+    scheduled: 'status-scheduled', confirmed: 'status-confirmed',
+    cancelled: 'status-cancelled',  completed: 'status-completed'
+  };
+  document.getElementById('modalStatus').innerHTML =
+    `<span class="status-badge ${statusClasses[appt.status]}">${statusLabels[appt.status] || appt.status}</span>`;
+
+  const confirmBtn = document.getElementById('modalConfirmBtn');
+  const cancelBtn  = document.getElementById('modalCancelBtn');
+  confirmBtn.style.display = appt.status === 'scheduled' ? '' : 'none';
+  cancelBtn.style.display  = ['scheduled','confirmed'].includes(appt.status) ? '' : 'none';
+
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+function showToast(msg, duration = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+// ── Main load ──────────────────────────────────────────────────────────────
+async function loadWeek() {
+  const days = currentWeekDays();
+  renderDayHeaders(days);
+  renderGridLines();
+  renderTimeCol();
+
+  const dateFrom = fmtDate(days[0]);
+  const dateTo   = fmtDate(days[6]);
+
+  try {
+    appointments = await fetchAppointments(dateFrom, dateTo);
+  } catch(e) {
+    appointments = [];
+    showToast('Error al cargar citas');
+  }
+
+  renderAppointments(days);
+  renderNowLine(days);
+}
+
+async function init() {
+  renderTimeCol();
+
+  try {
+    doctors = await fetchDoctors();
+    doctors.forEach((d, i) => { colorMap[d.id] = DOCTOR_COLORS[i % DOCTOR_COLORS.length]; });
+  } catch(e) {
+    doctors = [];
+  }
+
+  renderDoctorPills();
+  await loadWeek();
+  scrollToNow();
+
+  // Update now-line every minute
+  setInterval(() => renderNowLine(currentWeekDays()), 60_000);
+}
+
+// ── Events ─────────────────────────────────────────────────────────────────
+document.getElementById('prevWeek').addEventListener('click', () => {
+  weekOffset--;
+  loadWeek();
+});
+document.getElementById('nextWeek').addEventListener('click', () => {
+  weekOffset++;
+  loadWeek();
+});
+document.getElementById('todayBtn').addEventListener('click', () => {
+  weekOffset = 0;
+  loadWeek();
+  scrollToNow();
+});
+
+document.getElementById('modalClose').addEventListener('click', closeModal);
+document.getElementById('modalOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modalOverlay')) closeModal();
+});
+
+document.getElementById('modalConfirmBtn').addEventListener('click', async () => {
+  try {
+    await confirmAppointment(currentApptId);
+    showToast('✅ Cita confirmada');
+    closeModal();
+    loadWeek();
+  } catch(e) {
+    showToast('Error: ' + e.message);
+  }
+});
+
+document.getElementById('modalCancelBtn').addEventListener('click', async () => {
+  if (!confirm('¿Seguro que quieres cancelar esta cita?')) return;
+  try {
+    await cancelAppointment(currentApptId);
+    showToast('Cita cancelada');
+    closeModal();
+    loadWeek();
+  } catch(e) {
+    showToast('Error: ' + e.message);
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if (e.key === 'ArrowLeft' && !document.getElementById('modalOverlay').classList.contains('open')) {
+    weekOffset--; loadWeek();
+  }
+  if (e.key === 'ArrowRight' && !document.getElementById('modalOverlay').classList.contains('open')) {
+    weekOffset++; loadWeek();
+  }
+});
+
+// ── Start ──────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

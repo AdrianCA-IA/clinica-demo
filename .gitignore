@@ -1,0 +1,28 @@
+# Entorno
+.env
+*.env
+
+# Credenciales (nunca al repo)
+credentials/
+*.json.key
+
+# Base de datos local
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
